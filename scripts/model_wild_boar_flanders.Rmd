@@ -1,0 +1,262 @@
+
+# 1 Libraries
+```{r}
+library(biomod2)
+library(ggplot2)
+library(gridExtra)
+library(raster)
+library(rasterVis)
+library(sf)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(tidygeocoder)
+library(tidyr)
+library(tidyterra)
+library(ggtext)
+```
+
+# 2 Environmental variables 
+```{r}
+variables <- raster :: stack (c(
+  other_agri_dist =
+    "~/model/ascii/agr_d_train.asc",
+  con_dist = 
+    "~/model/ascii/con_d_train.asc",
+  decid_dist = 
+    "~/model/ascii/dec_d_train.asc",
+  lowcover_dist = 
+    "~/model/ascii/low_d_train.asc", 
+  mais_dist = 
+    "~/model/ascii/maize_d_train.asc",
+  water_dist = 
+    "~/model/ascii/water_d_train.asc", 
+  conif_frac = 
+    "~/model/ascii/con_frac_train.asc", 
+  agri_frac = 
+    "~/model/ascii/agr_frac_train.asc", 
+  water_frac = 
+    "~/model/ascii/water_frac_train.asc",
+  decid_frac = 
+    "~/model/ascii/dec_frac_train.asc",
+  maize_frac =
+    "~/model/ascii/maize_frac_train.asc",
+  lowcover_frac = 
+    "~/model/ascii/low_frac_train.asc",
+  urban_frac = 
+    "~/model/ascii/urban_frac_train.asc", 
+  shannon_wiener = 
+    "~/model/ascii/shannon_train.asc", 
+  forest_patch_density = 
+    "~/model/ascii/forest_dens_train.asc", 
+  mean_forest_patch_size = 
+    "~/model/ascii/forest_size_train.asc", 
+  road_density = 
+    "~/model/ascii/road_dens_train.asc"
+    
+))
+
+newvar <- raster :: stack (c(
+  other_agri_dist =
+    "~/model/ascii/agr_d_pred.asc",
+  con_dist = 
+    "~/model/ascii/con_d_pred.asc",
+  decid_dist = 
+    "~/model/ascii/dec_d_pred.asc",
+  lowcover_dist = 
+    "~/model/ascii/low_d_pred.asc", 
+  mais_dist = 
+    "~/model/ascii/maize_d_pred.asc",
+  water_dist = 
+    "~/model/ascii/water_d_pred.asc", 
+  conif_frac = 
+    "~/model/ascii/con_frac_pred.asc", 
+  agri_frac = 
+    "~/model/ascii/agr_frac_pred.asc", 
+  water_frac = 
+    "~/model/ascii/water_frac_pred.asc",
+  decid_frac = 
+    "~/model/ascii/dec_frac_pred.asc",
+  maize_frac =
+    "~/model/ascii/maize_frac_pred.asc",
+  lowcover_frac = 
+    "~/model/ascii/low_frac_pred.asc",
+  urban_frac = 
+    "~/model/ascii/urban_frac_pred.asc", 
+  shannon_wiener = 
+    "~/model/ascii/shannon_pred.asc", 
+  forest_patch_density = 
+    "~/model/ascii/forest_dens_pred.asc", 
+  mean_forest_patch_size = 
+    "~/model/ascii/forest_size_pred.asc", 
+  road_density = 
+    "~/model/ascii/road_dens_pred.asc"
+    
+))
+
+```
+
+# 3 Preparation data 
+```{r}
+data_wild_boar <- read.csv("~/model/data_wild_boar_final.csv",
+                 sep = ",",
+                 header = TRUE)
+
+pseudo_absences_shp <- st_read("~/model/pseudo_1102.shp")
+data_wild_boar$wild_boar <- 1
+
+pseudo_absences <- as.data.frame(pseudo_absences_shp)
+colnames(pseudo_absences)[colnames(pseudo_absences) == "x"] <- "NEAR_X"
+colnames(pseudo_absences)[colnames(pseudo_absences) == "y"] <- "NEAR_Y"
+pseudo_absences$repetition1 <- TRUE
+pseudo_absences <- pseudo_absences %>%
+                                   select(NEAR_X,NEAR_Y,repetition1)
+combined_data <- merge(data_wild_boar, pseudo_absences, by = c("NEAR_X", "NEAR_Y"), all = TRUE)
+myPAtable <- data.frame(PA1 = ifelse(combined_data$wild_boar == 1, TRUE, FALSE)) 
+myPAtable$PA1 <- ifelse(is.na(myPAtable$PA1 ), TRUE, myPAtable$PA1  ) 
+
+```
+
+# 4 Formatting data
+```{r}
+wild_boar_dataset_2 <- BIOMOD_FormatingData(
+                                           resp.var = combined_data$wild_boar,
+                                           expl.var = variables, 
+                                           resp.xy = combined_data[, c("NEAR_X", "NEAR_Y")], 
+                                           resp.name = "wild_boar", 
+                                           PA.strategy = "user.defined",
+                                           PA.user.table = myPAtable, 
+                                           filter = TRUE
+)
+plot(wild_boar_dataset_2)
+```
+
+# 5 Individual statistical models
+```{r}
+options <- BIOMOD_ModelingOptions(
+GLM = NULL,
+GAM = NULL,
+RF = NULL,
+ANN = NULL,
+MAXENT = list(path_to_maxent.jar = "C:/Users/lucre/Documents/model/maxent/maxent.jar") 
+)
+wild_boar_models2 <- BIOMOD_Modeling(bm.format = wild_boar_dataset_2, 
+                                    models = c("MAXENT", "GLM", "GAM", "RF", "ANN"), 
+                                    models.pa = NULL,
+                                    bm.options = options,
+                                    CV.strategy = "random",
+                                    CV.nb.rep = 5,
+                                    CV.perc = 0.70,
+                                    var.import = 5,
+                                    metric.eval = "ROC",
+                                    do.full.models = TRUE)
+
+```
+
+# 6 Model performance
+```{r}
+scores_ind <- get_evaluations(wild_boar_models2)
+bm_PlotEvalBoxplot(bm.out = wild_boar_models2, group.by = c('algo', 'algo'))
+bm_PlotEvalBoxplot(bm.out = wild_boar_models2, dataset = "validation", group.by = c('algo', 'algo'))
+```
+
+# 7 Response plots individual statistical models
+```{r}
+bm_PlotResponseCurves(
+  bm.out =wild_boar_models2,
+  models.chosen = "all",
+  new.env = get_formal_data(wild_boar_models2, "expl.var"),
+  show.variables = get_formal_data(wild_boar_models2, "expl.var.names"), 
+  do.bivariate = FALSE,
+  fixed.var = "median"
+)
+```
+
+# 8 variable importance individual models
+```{r}
+var <- bm_PlotVarImpBoxplot(
+  bm.out =  wild_boar_models2,
+  group.by = c( "expl.var", "run","algo"),
+  do.plot = FALSE
+)
+var2 <- as.data.frame(var$tab)
+```
+
+# 9 current and new area projection individual statistical models
+```{r}
+# for the current region 
+wild_boar_models_current <- BIOMOD_Projection(bm.mod = wild_boar_models2, 
+                                              new.env = variables,
+                                              proj.name = "current2", 
+                                              models.chosen = "all"
+                                              
+  
+)
+plot(wild_boar_models_current)
+
+
+wild_boar_models_new <- BIOMOD_Projection(bm.mod = wild_boar_models2, 
+                                              new.env = newvar,
+                                              proj.name = "new", 
+                                              models.chosen = "all"
+                                            
+)
+plot(wild_boar_models_new)
+```
+
+# 10 BIOMOD-ensemble modelling 
+```{r}
+wild_boar_ensemble <- BIOMOD_EnsembleModeling(
+  bm.mod = wild_boar_models2,
+  em.by = "all",
+  em.algo = "EMwmean",
+  models.chosen = "all", 
+  metric.select = "ROC", 
+  var.import = 5, 
+  metric.select.thresh = 0.6, 
+  EMwmean.decay = 'proportional', 
+  metric.select.dataset = "validation"
+)
+
+```
+# 11 variable importance and evaluation scores
+```{r}
+var <- bm_PlotVarImpBoxplot(
+  bm.out =  wild_boar_ensemble,
+  group.by = c( "expl.var", "algo","full.name"),
+  do.plot = FALSE
+)
+var3 <- as.data.frame(var$tab)
+scores <- get_evaluations(wild_boar_ensemble)
+
+```
+
+# 12 Response plots ensemble model
+```{r}
+bm_PlotResponseCurves(
+  bm.out =wild_boar_ensemble,
+  models.chosen = "all",
+  new.env = get_formal_data(wild_boar_models2, "expl.var"),
+  show.variables = get_formal_data(wild_boar_models2, "expl.var.names"), 
+  do.bivariate = FALSE,
+  fixed.var = "median"
+)
+
+```
+
+# 13 current and new area projection ensemble model
+```{r}
+projection_current <- BIOMOD_EnsembleForecasting(bm.em = wild_boar_ensemble,
+                                             bm.proj = wild_boar_models_current,
+                                             models.chosen = "all"
+                                             )
+plot(projection_current)
+projection_newvar <- BIOMOD_EnsembleForecasting(bm.em = wild_boar_ensemble,
+                                             bm.proj = wild_boar_models_new,
+                                             models.chosen = "all"
+                                             )
+```
+
+
+
+
